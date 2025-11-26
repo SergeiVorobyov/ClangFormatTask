@@ -1,0 +1,46 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <UsingTask
+      TaskName="ClangFormatTask"
+      AssemblyFile="$(MSBuildThisFileDirectory)ClangFormatTask.dll" />
+
+  <PropertyGroup>
+    <ClangFormatExe>clang-format</ClangFormatExe>
+
+    <!-- MaxProcesses: "auto" to use all logical cores, or a number -->
+    <ClangFormatMaxProcesses>auto</ClangFormatMaxProcesses>
+
+    <!-- Optional global .clang-format file -->
+    <ClangFormatConfigFile>$(MSBuildThisFileDirectory).clang-format</ClangFormatConfigFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ClangFormatFiles Include="@(ClCompile);@(ClInclude)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ClangFormatIgnore Include=".*_g\.h\.$" />
+    <ClangFormatIgnore Include=".*_i\.h\.$" />
+    <ClangFormatIgnore Include=".*_i\.c\.$" />
+    <ClangFormatIgnore Include=".*_dlldata\.c\.$" />
+    <ClangFormatIgnore Include=".*_p\.c\.$" />
+    <ClangFormatIgnore Include=".*\\dlldata\.c\.$" />
+    <ClangFormatIgnore Include=".*\\unity_[A-Z0-9]*\.cpp\.$" />
+  </ItemGroup>
+
+  <Target Name="RunClangFormat"
+          BeforeTargets="ClCompile"
+          Inputs="@(ClangFormatFiles)"
+          Outputs="%(ClangFormatFiles.Identity).format.stamp">
+
+    <Message Text="Running ClangFormat incrementally..." Importance="High" />
+
+    <ClangFormatTask
+        InputFiles="@(ClangFormatFiles)"
+        ClangFormatExe="$(ClangFormatExe)"
+        IgnorePatterns="@(ClangFormatIgnore)"
+        MaxProcesses="$(ClangFormatMaxProcesses)"
+        ConfigFile="$(ClangFormatConfigFile)" />
+  </Target>
+
+</Project>
