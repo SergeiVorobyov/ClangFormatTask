@@ -3,6 +3,7 @@
     <TargetFramework>net472</TargetFramework>
     <AssemblyName>ClangFormatTask</AssemblyName>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <LangVersion>latest</LangVersion>
   </PropertyGroup>
   <ItemGroup>
     <None Remove="ClangFormat.targets" />
