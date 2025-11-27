@@ -12,6 +12,8 @@ using MSBuildTask = Microsoft.Build.Utilities.Task;
 
 public class ClangFormatTask : MSBuildTask
 {
+    static readonly string stamp_extension = ".stamp";
+
     // Directory to start scanning for source files (project dir by default)
     [Required]
     public string RootDirectory { get; set; }
@@ -28,6 +30,7 @@ public class ClangFormatTask : MSBuildTask
     public string Extensions { get; set; } = ".cpp;.c;.h;.hpp";
 
     // ItemGroup of regex patterns to ignore (passed from MSBuild)
+    [Required]
     public ITaskItem[] IgnorePatterns { get; set; }
 
     // Number or "auto"
@@ -215,7 +218,7 @@ public class ClangFormatTask : MSBuildTask
                     Log.LogMessage(MessageImportance.High, m);
             }
 
-            Log.LogMessage(MessageImportance.High, $"{reformattedCount} of files have been reformatted ({ignoredFiles.Count()} ignored).");
+            Log.LogMessage(MessageImportance.High, $"{reformattedCount} of {filesToFormat.Count} files have been reformatted ({ignoredFiles.Count()} ignored).");
 
             if (effectiveVerbosity >= 2 && ignoredFiles.Count > 0)
             {
@@ -328,11 +331,31 @@ public class ClangFormatTask : MSBuildTask
 
     private string MakeStampFileName(string rootDir, string filePath)
     {
-        // create a stamp filename that encodes relative path to avoid clashes across projects
-        string relative = GetRelativePath(rootDir, filePath);
-        // replace directory separators with '_' to create a safe filename
-        var safe = relative.Replace(Path.DirectorySeparatorChar, '_').Replace(Path.AltDirectorySeparatorChar, '_');
-        return safe + ".format.stamp";
+        try
+        {
+            string relative = GetRelativePath(rootDir, filePath);
+
+            // Compute hash of relative path
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            byte[] hashBytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(relative));
+            string hashString = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+
+            // Sanitize original file name: remove invalid chars
+            string fileName = Path.GetFileName(filePath);
+            string sanitized = string.Concat(fileName.Select(c =>
+                char.IsLetterOrDigit(c) || c == '_' || c == '-' ? c : '_'));
+
+            return $"{sanitized}_{hashString}{stamp_extension}";
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning($"Failed to generate stamp filename for {filePath}: {ex.Message}");
+            string fallback = filePath.GetHashCode().ToString("x");
+            string fileName = Path.GetFileName(filePath);
+            string sanitized = string.Concat(fileName.Select(c =>
+                char.IsLetterOrDigit(c) || c == '_' || c == '-' ? c : '_'));
+            return $"{sanitized}_{fallback}{stamp_extension}";
+        }
     }
 
     private void UpdateStamp(string stampFile, string hash)
@@ -352,12 +375,15 @@ public class ClangFormatTask : MSBuildTask
     {
         try
         {
-            using (var stream = File.OpenRead(file))
-            using (var sha = System.Security.Cryptography.SHA256.Create())
-            {
-                byte[] hash = sha.ComputeHash(stream);
-                return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
-            }
+            using var stream = File.OpenRead(file);
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            byte[] hash = sha.ComputeHash(stream);
+
+            // Compatible hex conversion
+            var sb = new System.Text.StringBuilder(hash.Length * 2);
+            foreach (var b in hash)
+                sb.Append(b.ToString("x2")); // lowercase hex
+            return sb.ToString();
         }
         catch (Exception ex)
         {
@@ -365,31 +391,16 @@ public class ClangFormatTask : MSBuildTask
             return null;
         }
     }
+
     private bool HasFileChanged(string file, string stampFile)
     {
         string currentHash = ComputeFileHash(file);
+        if (currentHash == null) return true;
 
-        if (currentHash == null)
-        {
-            // treat unreadable file as changed
-            return true;
-        }
+        if (!File.Exists(stampFile)) return true;
 
-        try
-        {
-            if (!File.Exists(stampFile))
-                return true;
-
-            string oldHash = File.ReadAllText(stampFile).Trim();
-
-            // If hash matches that means the file is unchanged
-            return !string.Equals(currentHash, oldHash, StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            // On any issue treat as changed
-            return true;
-        }
+        string oldHash = File.ReadAllText(stampFile).Trim();
+        return !string.Equals(currentHash, oldHash, StringComparison.OrdinalIgnoreCase);
     }
 
     private bool IsIgnored(string file)
