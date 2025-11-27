@@ -13,6 +13,8 @@ using MSBuildTask = Microsoft.Build.Utilities.Task;
 public class ClangFormatTask : MSBuildTask
 {
     static readonly string stamp_extension = ".stamp";
+    static readonly string extensions = ".cpp|.c|.h|.hpp|.inl";
+    static readonly string processors = "1";
 
     // Directory to start scanning for source files (project dir by default)
     [Required]
@@ -25,51 +27,39 @@ public class ClangFormatTask : MSBuildTask
     [Required]
     public string StampDirectory { get; set; }
 
-    // Semicolon separated extensions, e.g. ".cpp;.c;.h;.hpp" is default.
-    [Required]
-    public string Extensions { get; set; } = ".cpp;.c;.h;.hpp";
+    // Pipe separated extensions, e.g. ".cpp|.c|.h|.hpp" is default.
+    public string Extensions { get; set; } = extensions;
 
-    // ItemGroup of regex patterns to ignore (passed from MSBuild)
-    [Required]
-    public ITaskItem[] IgnorePatterns { get; set; }
+    // Pipe separated regex patterns to ignore
+    public string IgnorePatterns { get; set; }
 
     // Number or "auto"
-    public string MaxProcesses { get; set; } = "1";
+    public string MaxProcesses { get; set; } = processors;
 
     // Optional global config file path (if empty, clang-format will search)
     public string ConfigFile { get; set; }
 
     private List<Regex> _ignoreRegexList;
 
-    private static int _seenNodeId = 0;
-
-    private int NodeId
-    {
-        get
-        {
-            var engine = BuildEngine as IBuildEngine6;
-            var props = engine.GetGlobalProperties();
-            return (engine != null && engine.GetGlobalProperties().TryGetValue("VSTEL_CurrentSolutionBuildID", out string val) && int.TryParse(val, out int res)) ? res : -1;
-        }
-    }
-
-    private bool VersionAlreadyEmittedThisBuild
-    {
-        get
-        {
-            return _seenNodeId == NodeId;
-        }
-    }
-
-    private void MarkVersionEmitted()
-    {
-        _seenNodeId = NodeId;
-    }
-
     public override bool Execute()
     {
-        Debugger.Launch();
+        var res = ExecuteImpl();
 
+        // Cleanup
+        RootDirectory = null;
+        ClangFormatToolPath = null;
+        StampDirectory = null;
+        Extensions = extensions;
+        IgnorePatterns = null;
+        MaxProcesses = processors;
+        ConfigFile = null;
+        _ignoreRegexList.Clear();
+
+        return res;
+    }
+
+    public bool ExecuteImpl()
+    {
         try
         {
             // Normalize root
@@ -89,21 +79,22 @@ public class ClangFormatTask : MSBuildTask
             }
 
             // Build ignore regex list
-            _ignoreRegexList = new List<Regex>();
+            _ignoreRegexList = [];
             if (IgnorePatterns != null)
             {
-                foreach (var item in IgnorePatterns)
+                var patterns = ParsePipeSeparateList(IgnorePatterns);
+
+                foreach (var item in patterns)
                 {
-                    var pattern = item.ItemSpec;
-                    if (!string.IsNullOrWhiteSpace(pattern))
+                    if (!string.IsNullOrWhiteSpace(item))
                     {
                         try
                         {
-                            _ignoreRegexList.Add(new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.Compiled));
+                            _ignoreRegexList.Add(new Regex(item, RegexOptions.IgnoreCase | RegexOptions.Compiled));
                         }
                         catch (Exception ex)
                         {
-                            Log.LogWarning($"Invalid ignore regex '{pattern}': {ex.Message}");
+                            Log.LogWarning($"Invalid ignore regex '{item}': {ex.Message}");
                         }
                     }
                 }
@@ -115,6 +106,10 @@ public class ClangFormatTask : MSBuildTask
             {
                 Log.LogError($"Could not find clang-format executable: {ClangFormatToolPath}");
                 return false;
+            }
+            else
+            {
+                Log.LogCommandLine(exeToRun);
             }
 
             IEnumerable<string> collected = null;
@@ -136,17 +131,13 @@ public class ClangFormatTask : MSBuildTask
                 return true;
             }
 
-            // Emit clang-format version once
-            if (!VersionAlreadyEmittedThisBuild)
-            {
-                EmitVersion(exeToRun);
-                MarkVersionEmitted();
-            }
+            // Emit clang-format version
+            EmitVersion(exeToRun);
 
             // Ensure stamp directory exists
             Directory.CreateDirectory(StampDirectory);
 
-            int effectiveVerbosity = GetEffectiveVerbosity();
+            var verbosityLevel = GetVerbosityLevel();
             int maxProcesses = ResolveMaxProcesses();
 
             var filesToFormat = new List<string>();
@@ -165,7 +156,7 @@ public class ClangFormatTask : MSBuildTask
 
                 if (!HasFileChanged(file, stampPath))
                 {
-                    if (effectiveVerbosity >= 1)
+                    if (verbosityLevel >= MessageImportance.Low)
                         Log.LogMessage(MessageImportance.Low, $"Skipping {file}, unchanged.");
                     continue;
                 }
@@ -178,12 +169,12 @@ public class ClangFormatTask : MSBuildTask
 
             if (filesToFormat.Count > 0)
             {
-                var logQueue = new ConcurrentQueue<string>();
+                var logQueue = new ConcurrentQueue<Tuple<MessageImportance, string>>();
 
                 Parallel.ForEach(filesToFormat, new ParallelOptions { MaxDegreeOfParallelism = maxProcesses }, file =>
                 {
-                    if (effectiveVerbosity >= 1)
-                        logQueue.Enqueue($"Formatting {file}...");
+                    if (verbosityLevel >= MessageImportance.Normal)
+                        logQueue.Enqueue(new Tuple<MessageImportance, string>(MessageImportance.Normal, $"Formatting {file}..."));
 
                     bool ok = RunClangFormatCapture(exeToRun, file, ConfigFile,
                         out string stdout, out string stderr, out string fullCommand, out int exitCode);
@@ -191,11 +182,11 @@ public class ClangFormatTask : MSBuildTask
                     if (!ok)
                     {
                         if (!string.IsNullOrEmpty(fullCommand))
-                            logQueue.Enqueue($"Command executed: {fullCommand}");
+                            logQueue.Enqueue(new Tuple<MessageImportance, string>(MessageImportance.Low, $"Command executed: {fullCommand}"));
                         if (!string.IsNullOrWhiteSpace(stdout))
-                            logQueue.Enqueue(stdout);
+                            logQueue.Enqueue(new Tuple<MessageImportance, string>(MessageImportance.High, stdout));
                         if (!string.IsNullOrWhiteSpace(stderr))
-                            logQueue.Enqueue(stderr);
+                            logQueue.Enqueue(new Tuple<MessageImportance, string>(MessageImportance.High, stderr));
 
                         success = false;
                     }
@@ -215,12 +206,14 @@ public class ClangFormatTask : MSBuildTask
 
                 // Emit queued logs
                 while (logQueue.TryDequeue(out var m))
-                    Log.LogMessage(MessageImportance.High, m);
+                {
+                    Log.LogMessage(m.Item1, m.Item2);
+                }
             }
 
             Log.LogMessage(MessageImportance.High, $"{reformattedCount} of {filesToFormat.Count} files have been reformatted ({ignoredFiles.Count()} ignored).");
 
-            if (effectiveVerbosity >= 2 && ignoredFiles.Count > 0)
+            if (verbosityLevel >= MessageImportance.Low && ignoredFiles.Count > 0)
             {
                 foreach (var f in ignoredFiles)
                     Log.LogMessage(MessageImportance.Low, $"Ignored {f}");
@@ -235,17 +228,18 @@ public class ClangFormatTask : MSBuildTask
         }
     }
 
+    private IEnumerable<string> ParsePipeSeparateList(string extensions)
+    {
+        return string.IsNullOrWhiteSpace(extensions) ? [] : extensions.Split(['|'], StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase);
+    }
+
     private string[] ParseExtensions(string extensions)
     {
-        if (string.IsNullOrWhiteSpace(extensions))
-            return Array.Empty<string>();
-
-        return extensions
-            .Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
+        return ParsePipeSeparateList(extensions)
             .Select(s => s.Trim().StartsWith(".") ? s.Trim() : "." + s.Trim())
             .ToArray();
     }
-
     private IEnumerable<string> CollectSourceFiles(string rootDir, string[] exts)
     {
         // Normalize extensions for fast lookup
@@ -537,24 +531,23 @@ public class ClangFormatTask : MSBuildTask
         return 1;
     }
 
-    private int GetEffectiveVerbosity()
+    /// <summary>
+    /// 0 = high only, 1 = high and normal, 2 = high, normal, and low
+    /// </summary>
+    private MessageImportance? GetVerbosityLevel()
     {
-        // 0 = summary only, 1 = summary + reformatted, 2 = summary + reformatted + ignored
-        int verbosity = 0;
-        try
+        if (Log.LogsMessagesOfImportance(MessageImportance.Low))
         {
-            var verbosityProp = BuildEngine.GetType().GetProperty("Verbosity");
-            if (verbosityProp != null)
-            {
-                var currentVerbosity = verbosityProp.GetValue(BuildEngine);
-                int v = (int)currentVerbosity;
-                if (v >= 3) // Detailed / Diagnostic
-                    verbosity = 2;
-                else if (v >= 2) // Normal
-                    verbosity = 1;
-            }
+            return MessageImportance.Low;
         }
-        catch { }
-        return verbosity;
+        if (Log.LogsMessagesOfImportance(MessageImportance.Normal))
+        {
+            return MessageImportance.Normal;
+        }
+        if (Log.LogsMessagesOfImportance(MessageImportance.High))
+        {
+            return MessageImportance.High;
+        }
+        return null;
     }
 }
