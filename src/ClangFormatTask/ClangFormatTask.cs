@@ -21,23 +21,17 @@ namespace ClangFormatTask
         // Directory to start scanning for source files (project dir by default)
         [Required]
         public string RootDirectory { get; set; }
-
         [Required]
         public string ClangFormatToolPath { get; set; }
-
         // Directory where stamp files are stored (intermediate dir)
         [Required]
         public string StampDirectory { get; set; }
-
         // Pipe separated extensions, e.g. ".cpp|.c|.h|.hpp" is default.
         public string Extensions { get; set; } = extensions;
-
         // Pipe separated regex patterns to ignore
         public string IgnorePatterns { get; set; }
-
         // Number or "auto"
         public string MaxProcesses { get; set; } = processors;
-
         // Optional global config file path (if empty, clang-format will search)
         public string ConfigFile { get; set; }
 
@@ -59,7 +53,6 @@ namespace ClangFormatTask
 
             return res;
         }
-
         public bool ExecuteImpl()
         {
             try
@@ -74,7 +67,9 @@ namespace ClangFormatTask
                 }
                 var root = RootDirectory;
                 if (!Path.IsPathRooted(root))
+                {
                     root = Path.GetFullPath(root);
+                }
 
                 if (!Directory.Exists(root))
                 {
@@ -105,7 +100,7 @@ namespace ClangFormatTask
                 }
 
                 // Resolve clang-format executable
-                string exeToRun = ResolveExecutable(ClangFormatToolPath);
+                string exeToRun = TaskUtils.ResolveExecutable(ClangFormatToolPath);
                 if (exeToRun == null)
                 {
                     Log.LogError($"Could not find clang-format executable: {ClangFormatToolPath}");
@@ -132,7 +127,9 @@ namespace ClangFormatTask
                 if (collected == null || !collected.Any())
                 {
                     if (verbosityLevel >= MessageImportance.Low)
+                    {
                         Log.LogMessage(MessageImportance.Low, "No input files available for ClangFormat.");
+                    }
                     return true;
                 }
 
@@ -161,7 +158,9 @@ namespace ClangFormatTask
                     if (!HasFileChanged(file, stampPath))
                     {
                         if (verbosityLevel >= MessageImportance.Low)
+                        {
                             Log.LogMessage(MessageImportance.Low, $"Skipping {file}, unchanged.");
+                        }
                         continue;
                     }
 
@@ -178,7 +177,9 @@ namespace ClangFormatTask
                     Parallel.ForEach(filesToFormat, new ParallelOptions { MaxDegreeOfParallelism = maxProcesses }, file =>
                     {
                         if (verbosityLevel >= MessageImportance.Normal)
+                        {
                             logQueue.Enqueue(new Tuple<MessageImportance, string>(MessageImportance.Normal, $"Formatting {file}..."));
+                        }
 
                         bool ok = TaskUtils.RunClangFormatCapture(exeToRun, file, ConfigFile,
                             out string stdout, out string stderr, out string fullCommand, out int exitCode);
@@ -186,11 +187,17 @@ namespace ClangFormatTask
                         if (!ok)
                         {
                             if (!string.IsNullOrEmpty(fullCommand))
+                            {
                                 logQueue.Enqueue(new Tuple<MessageImportance, string>(MessageImportance.Low, $"Command executed: {fullCommand}"));
+                            }
                             if (!string.IsNullOrWhiteSpace(stdout))
+                            {
                                 logQueue.Enqueue(new Tuple<MessageImportance, string>(MessageImportance.High, stdout));
+                            }
                             if (!string.IsNullOrWhiteSpace(stderr))
+                            {
                                 logQueue.Enqueue(new Tuple<MessageImportance, string>(MessageImportance.High, stderr));
+                            }
 
                             success = false;
                         }
@@ -220,7 +227,9 @@ namespace ClangFormatTask
                 if (verbosityLevel >= MessageImportance.Low && ignoredFiles.Count > 0)
                 {
                     foreach (var f in ignoredFiles)
+                    {
                         Log.LogMessage(MessageImportance.Low, $"Ignored {f}");
+                    }
                 }
 
                 return success && !Log.HasLoggedErrors;
@@ -231,7 +240,6 @@ namespace ClangFormatTask
                 return false;
             }
         }
-
         private IEnumerable<string> CollectSourceFiles(string rootDir, string[] exts)
         {
             // Normalize extensions for fast lookup
@@ -257,28 +265,42 @@ namespace ClangFormatTask
                     {
                         subdirs = Directory.EnumerateDirectories(dir);
                     }
-                    catch (UnauthorizedAccessException) { continue; }
-                    catch (PathTooLongException) { continue; }
+                    catch (UnauthorizedAccessException)
+                    {
+                        continue;
+                    }
+                    catch (PathTooLongException)
+                    {
+                        continue;
+                    }
 
                     // Try reading files
                     try
                     {
                         files = Directory.EnumerateFiles(dir);
                     }
-                    catch (UnauthorizedAccessException) { }
-                    catch (PathTooLongException) { }
+                    catch (UnauthorizedAccessException)
+                    {
+                    }
+                    catch (PathTooLongException)
+                    {
+                    }
 
                     // Add matched files
                     foreach (var f in files)
                     {
                         string ext = Path.GetExtension(f);
                         if (extSet.Contains(ext))
+                        {
                             results.Add(f);
+                        }
                     }
 
                     // Push subdirectories for DFS
                     foreach (string s in subdirs)
+                    {
                         dirs.Push(s);
+                    }
                 }
             }
             catch (Exception ex)
@@ -319,7 +341,6 @@ namespace ClangFormatTask
                 return $"{sanitized}_{fallback}{stamp_extension}";
             }
         }
-
         private void UpdateStamp(string stampFile, string hash)
         {
             try
@@ -332,7 +353,6 @@ namespace ClangFormatTask
                 Log.LogWarning($"Failed to update stamp {stampFile}: {ex.Message}");
             }
         }
-
         private string ComputeFileHash(string file)
         {
             try
@@ -344,7 +364,10 @@ namespace ClangFormatTask
                 // Compatible hex conversion
                 var sb = new System.Text.StringBuilder(hash.Length * 2);
                 foreach (var b in hash)
-                    sb.Append(b.ToString("x2")); // lowercase hex
+                {
+                    // lowercase hex
+                    sb.Append(b.ToString("x2"));
+                }
                 return sb.ToString();
             }
             catch (Exception ex)
@@ -353,31 +376,41 @@ namespace ClangFormatTask
                 return null;
             }
         }
-
         private bool HasFileChanged(string file, string stampFile)
         {
             string currentHash = ComputeFileHash(file);
-            if (currentHash == null) return true;
-
-            if (!File.Exists(stampFile)) return true;
+            if (currentHash == null)
+            {
+                return true;
+            }
+            if (!File.Exists(stampFile))
+            {
+                return true;
+            }
 
             string oldHash = File.ReadAllText(stampFile).Trim();
             return !string.Equals(currentHash, oldHash, StringComparison.OrdinalIgnoreCase);
         }
-
         private bool IsIgnored(string file)
         {
             if (_ignoreRegexList == null || _ignoreRegexList.Count == 0)
+            {
                 return false;
+            }
 
             foreach (var r in _ignoreRegexList)
             {
                 try
                 {
                     if (r.IsMatch(file))
+                    {
                         return true;
+                    }
                 }
-                catch { /* ignore regex runtime errors here */ }
+                catch
+                {
+                    // ignore regex runtime errors here
+                }
             }
             return false;
         }
@@ -397,33 +430,15 @@ namespace ClangFormatTask
                 proc.WaitForExit();
 
                 if (!string.IsNullOrEmpty(versionLine))
+                {
                     Log.LogMessage(MessageImportance.High, $"Using {versionLine}");
+                }
             }
             catch (Exception ex)
             {
                 Log.LogWarning($"Failed to detect clang-format version: {ex.Message}");
             }
         }
-
-        private string ResolveExecutable(string exe)
-        {
-            try
-            {
-                if (File.Exists(exe))
-                    return Path.GetFullPath(exe);
-
-                // If simple name, rely on PATH resolution at runtime
-                if (!exe.Contains(Path.DirectorySeparatorChar.ToString()) &&
-                    !exe.Contains(Path.AltDirectorySeparatorChar.ToString()))
-                {
-                    return exe;
-                }
-            }
-            catch { }
-
-            return null;
-        }
-
         private int ResolveMaxProcesses()
         {
             if (string.Equals(MaxProcesses, "auto", StringComparison.OrdinalIgnoreCase))
@@ -439,10 +454,6 @@ namespace ClangFormatTask
 
             return 1;
         }
-
-        /// <summary>
-        /// 0 = high only, 1 = high and normal, 2 = high, normal, and low
-        /// </summary>
         private MessageImportance? GetVerbosityLevel()
         {
             if (Log.LogsMessagesOfImportance(MessageImportance.Low))

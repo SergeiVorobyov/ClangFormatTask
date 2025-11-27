@@ -37,7 +37,9 @@ namespace ClangFormatTask
         public static string AppendDirectorySeparator(string path)
         {
             if (!path.EndsWith(Path.DirectorySeparatorChar.ToString()))
+            {
                 return path + Path.DirectorySeparatorChar;
+            }
             return path;
         }
         public static string Quoted(string configFile)
@@ -65,7 +67,9 @@ namespace ClangFormatTask
 
                 string args = "-i";
                 if (!string.IsNullOrEmpty(configFile))
+                {
                     args = $"-style=file:{Quoted(configFile)} {args}";
+                }
 
                 args += $" \"{file}\"";
                 psi.Arguments = args;
@@ -95,6 +99,27 @@ namespace ClangFormatTask
                 fullCommand = $"{exe} (failed to start)";
                 return false;
             }
+        }
+        public static string ResolveExecutable(string exe)
+        {
+            try
+            {
+                if (File.Exists(exe))
+                {
+                    return Path.GetFullPath(exe);
+                }
+
+                // If simple name, rely on PATH resolution at runtime
+                if (!exe.Contains(Path.DirectorySeparatorChar.ToString()) &&
+                    !exe.Contains(Path.AltDirectorySeparatorChar.ToString()))
+                {
+                    return exe;
+                }
+            }
+            catch
+            {
+            }
+            return null;
         }
     }
 }
