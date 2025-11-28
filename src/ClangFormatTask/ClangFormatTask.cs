@@ -73,7 +73,7 @@ namespace ClangFormatTask
 
                 if (!Directory.Exists(root))
                 {
-                    Log.LogError($"RootDirectory does not exist: {root}");
+                    Log.LogError($@"RootDirectory does not exist: ""{root}""");
                     return false;
                 }
 
@@ -93,7 +93,7 @@ namespace ClangFormatTask
                             }
                             catch (Exception ex)
                             {
-                                Log.LogWarning($"Invalid ignore regex '{item}': {ex.Message}");
+                                Log.LogWarning($@"Invalid ignore regex ""{item}"": ""{ex.Message}""");
                             }
                         }
                     }
@@ -103,7 +103,7 @@ namespace ClangFormatTask
                 string exeToRun = TaskUtils.ResolveExecutable(ClangFormatToolPath);
                 if (exeToRun == null)
                 {
-                    Log.LogError($"Could not find clang-format executable: {ClangFormatToolPath}");
+                    Log.LogError($@"Could not find clang-format executable: ""{ClangFormatToolPath}"".");
                     return false;
                 }
                 else
@@ -117,7 +117,7 @@ namespace ClangFormatTask
                     var exts = TaskUtils.ParseExtensions(Extensions);
                     if (exts.Length == 0)
                     {
-                        Log.LogWarning($"No extensions provided in Extensions property ('{Extensions}').");
+                        Log.LogWarning($@"No extensions provided in Extensions property (""{Extensions}"").");
                         return false;
                     }
 
@@ -128,13 +128,10 @@ namespace ClangFormatTask
                 {
                     if (verbosityLevel >= MessageImportance.Low)
                     {
-                        Log.LogMessage(MessageImportance.Low, "No input files available for ClangFormat.");
+                        Log.LogMessage(MessageImportance.Low, $@"No input files available for ClangFormat in directory ""{root}"".");
                     }
                     return true;
                 }
-
-                // Emit clang-format version
-                EmitVersion(exeToRun);
 
                 // Ensure stamp directory exists
                 Directory.CreateDirectory(StampDirectory);
@@ -159,7 +156,7 @@ namespace ClangFormatTask
                     {
                         if (verbosityLevel >= MessageImportance.Low)
                         {
-                            Log.LogMessage(MessageImportance.Low, $"Skipping {file}, unchanged.");
+                            Log.LogMessage(MessageImportance.Low, $@"Skipping ""{file}"", unchanged.");
                         }
                         continue;
                     }
@@ -172,13 +169,16 @@ namespace ClangFormatTask
 
                 if (filesToFormat.Count > 0)
                 {
+                    // Emit clang-format version
+                    EmitVersion(exeToRun);
+
                     var logQueue = new ConcurrentQueue<Tuple<MessageImportance, string>>();
 
                     Parallel.ForEach(filesToFormat, new ParallelOptions { MaxDegreeOfParallelism = maxProcesses }, file =>
                     {
                         if (verbosityLevel >= MessageImportance.Normal)
                         {
-                            logQueue.Enqueue(new Tuple<MessageImportance, string>(MessageImportance.Normal, $"Formatting {file}..."));
+                            logQueue.Enqueue(new Tuple<MessageImportance, string>(MessageImportance.Normal, $@"Formatting ""{file}""..."));
                         }
 
                         bool ok = TaskUtils.RunClangFormatCapture(exeToRun, file, ConfigFile,
@@ -188,7 +188,7 @@ namespace ClangFormatTask
                         {
                             if (!string.IsNullOrEmpty(fullCommand))
                             {
-                                logQueue.Enqueue(new Tuple<MessageImportance, string>(MessageImportance.Low, $"Command executed: {fullCommand}"));
+                                logQueue.Enqueue(new Tuple<MessageImportance, string>(MessageImportance.Low, $@"Command executed: ""{fullCommand}"""));
                             }
                             if (!string.IsNullOrWhiteSpace(stdout))
                             {
@@ -222,13 +222,25 @@ namespace ClangFormatTask
                     }
                 }
 
-                Log.LogMessage(MessageImportance.High, $"{reformattedCount} of {filesToFormat.Count} files have been reformatted ({ignoredFiles.Count()} ignored).");
+                if (reformattedCount == 0 && filesToFormat.Count == 0)
+                {
+                    Log.LogMessage(MessageImportance.High,
+                        $"All files are up to date. No formatting is required. " +
+                        $"{collected.Count() - ignoredFiles.Count} file(s) already formatted, " +
+                        $"{ignoredFiles.Count} file(s) ignored.");
+                }
+                else
+                {
+                    Log.LogMessage(MessageImportance.High,
+                        $"{reformattedCount} of {filesToFormat.Count} file(s) have been reformatted, " +
+                        $"{ignoredFiles.Count} file(s) ignored.");
+                }
 
                 if (verbosityLevel >= MessageImportance.Low && ignoredFiles.Count > 0)
                 {
                     foreach (var f in ignoredFiles)
                     {
-                        Log.LogMessage(MessageImportance.Low, $"Ignored {f}");
+                        Log.LogMessage(MessageImportance.Low, $@"Ignored ""{f}""");
                     }
                 }
 
