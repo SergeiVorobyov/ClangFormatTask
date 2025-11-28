@@ -1,0 +1,37 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- Set to false if you need to disble completly -->
+  <PropertyGroup Condition="'$(RunClangFormat)' != 'false'">
+    <!-- clang-format executable (name or full path) -->
+    <ClangFormatToolPath>clang-format</ClangFormatToolPath>
+    <!-- MaxProcesses: "auto" or a number -->
+    <ClangFormatMaxProcesses>auto</ClangFormatMaxProcesses>
+    <!-- Optional global .clang-format config (if empty, clang-format will search) -->
+    <ClangFormatConfigFile>$(MSBuildThisFileDirectory).clang-format</ClangFormatConfigFile>
+    <!-- Stamp directory inside intermediate directory -->
+    <ClangFormatTaskIntDir>$(IntDir)ClangFormatTask\</ClangFormatTaskIntDir>
+    <!-- Root directory to scan (project directory by default) -->
+    <ClangFormatRoot>$(MSBuildProjectDirectory)</ClangFormatRoot>
+    <!-- File extensions to scan (pipe separated) -->
+    <ClangFormatExtensions>.cppm|.cxx|.cc|.hh|.hxx|.ixx|$(ClangFormatExtensions)</ClangFormatExtensions>
+    <!-- Ignore list (regex). Edit/extend per project by adding additional items -->
+    <ClangFormatIgnore>.*_i\.h|.*_i\.c|.*_dlldata\.c|.*\\dlldata\.c|.*_p\.c|.*\\unity_[A-Z0-9]*\.cpp|$(ClangFormatIgnore)</ClangFormatIgnore>
+    <!-- Default: run before ClCompile -->
+    <RunClangFormatBeforeTarget>ClCompile</RunClangFormatBeforeTarget>
+  </PropertyGroup>
+  <Target Name="ClangFormatCleanStamps" BeforeTargets="Clean">
+    <Message Text="Removing $(ClangFormatTaskIntDir) with all ClangFormat stamp files" Importance="normal" />
+    <RemoveDir Directories="$(ClangFormatTaskIntDir)" />
+  </Target>
+  <UsingTask TaskName="ClangFormatTask" AssemblyFile="$(MSBuildThisFileDirectory)ClangFormatTask.dll" />
+  <Target Name="RunClangFormat" BeforeTargets="$(RunClangFormatBeforeTarget)">
+    <Message Text="Running ClangFormat incrementally..." Importance="normal" />
+    <ClangFormatTask
+        RootDirectory="$([MSBuild]::NormalizePath('$(ClangFormatRoot)'))"
+        Extensions="$(ClangFormatExtensions)"
+        ClangFormatToolPath="$(ClangFormatToolPath)"
+        IgnorePatterns="$(ClangFormatIgnore)"
+        MaxProcesses="$(ClangFormatMaxProcesses)"
+        ConfigFile="$([MSBuild]::NormalizePath('$(ClangFormatConfigFile)'))"
+        StampDirectory="$([MSBuild]::NormalizePath('$(ClangFormatTaskIntDir)'))" />
+  </Target>
+</Project>
