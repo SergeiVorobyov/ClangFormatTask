@@ -36,9 +36,11 @@ namespace ClangFormatTask
         public string ConfigFile { get; set; }
 
         private List<Regex> _ignoreRegexList;
+        private MessageImportance? VerbosityLevel { get; set; }
 
         public override bool Execute()
         {
+            VerbosityLevel = GetVerbosityLevel();
             var res = ExecuteImpl();
 
             // Cleanup
@@ -57,8 +59,6 @@ namespace ClangFormatTask
         {
             try
             {
-                var verbosityLevel = GetVerbosityLevel();
-
                 // Normalize root
                 if (string.IsNullOrWhiteSpace(RootDirectory))
                 {
@@ -126,7 +126,7 @@ namespace ClangFormatTask
                 }
                 if (collected == null || !collected.Any())
                 {
-                    if (verbosityLevel >= MessageImportance.Low)
+                    if (VerbosityLevel >= MessageImportance.Low)
                     {
                         Log.LogMessage(MessageImportance.Low, $@"No input files available for ClangFormat in directory ""{root}"".");
                     }
@@ -154,7 +154,7 @@ namespace ClangFormatTask
 
                     if (!HasFileChanged(file, stampPath))
                     {
-                        if (verbosityLevel >= MessageImportance.Low)
+                        if (VerbosityLevel >= MessageImportance.Low)
                         {
                             Log.LogMessage(MessageImportance.Low, $@"Skipping ""{file}"", unchanged.");
                         }
@@ -176,7 +176,7 @@ namespace ClangFormatTask
 
                     Parallel.ForEach(filesToFormat, new ParallelOptions { MaxDegreeOfParallelism = maxProcesses }, file =>
                     {
-                        if (verbosityLevel >= MessageImportance.Normal)
+                        if (VerbosityLevel >= MessageImportance.Normal)
                         {
                             logQueue.Enqueue(new Tuple<MessageImportance, string>(MessageImportance.Normal, $@"Formatting ""{file}""..."));
                         }
@@ -236,7 +236,7 @@ namespace ClangFormatTask
                         $"{ignoredFiles.Count} file(s) ignored.");
                 }
 
-                if (verbosityLevel >= MessageImportance.Low && ignoredFiles.Count > 0)
+                if (VerbosityLevel >= MessageImportance.Low && ignoredFiles.Count > 0)
                 {
                     foreach (var f in ignoredFiles)
                     {
@@ -428,6 +428,12 @@ namespace ClangFormatTask
         }
         private void EmitVersion(string exe)
         {
+            if (!(VerbosityLevel >= MessageImportance.Normal))
+            {
+                // The tool's version is not required, skip it early.
+                return;
+            }
+
             try
             {
                 var proc = new Process();
@@ -443,7 +449,7 @@ namespace ClangFormatTask
 
                 if (!string.IsNullOrEmpty(versionLine))
                 {
-                    Log.LogMessage(MessageImportance.High, $"Using {versionLine}");
+                    Log.LogMessage(MessageImportance.Normal, $"Using {versionLine}");
                 }
             }
             catch (Exception ex)
