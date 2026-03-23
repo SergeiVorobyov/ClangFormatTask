@@ -19,6 +19,7 @@ namespace ClangFormatTask
                 .Select(s => s.Trim().StartsWith(".") ? s.Trim() : "." + s.Trim())
                 .ToArray();
         }
+        // Returns the relative path from basePath to fullPath, or just filename if any error occurs
         public static string GetRelativePath(string basePath, string fullPath)
         {
             try
@@ -26,7 +27,9 @@ namespace ClangFormatTask
                 var baseUri = new Uri(AppendDirectorySeparator(basePath));
                 var fullUri = new Uri(fullPath);
                 var relUri = baseUri.MakeRelativeUri(fullUri);
-                return Uri.UnescapeDataString(relUri.ToString().Replace('/', Path.DirectorySeparatorChar));
+                var relativePath = Uri.UnescapeDataString(relUri.ToString().Replace('/', Path.DirectorySeparatorChar));
+                relativePath = relativePath.Remove(relativePath.Length - Path.GetFileName(fullPath).Length);
+                return relativePath.Length > 0 ? relativePath : new string(Path.DirectorySeparatorChar, 1);
             }
             catch
             {

@@ -1,6 +1,5 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <!-- Set to false if you need to disble completly -->
-  <PropertyGroup Condition="'$(RunClangFormat)' != 'false'">
+  <PropertyGroup>
     <!-- clang-format executable (name or full path) -->
     <ClangFormatToolPath>clang-format</ClangFormatToolPath>
     <!-- MaxProcesses: "auto" or a number -->
@@ -23,15 +22,16 @@
     <RemoveDir Directories="$(ClangFormatTaskIntDir)" />
   </Target>
   <UsingTask TaskName="ClangFormatTask" AssemblyFile="$(MSBuildThisFileDirectory)ClangFormatTask.dll" />
-  <Target Name="RunClangFormat" BeforeTargets="$(RunClangFormatBeforeTarget)">
+  <Target Name="RunClangFormatTool" BeforeTargets="$(RunClangFormatBeforeTarget)">
     <Message Text="Running ClangFormat incrementally..." Importance="normal" />
     <ClangFormatTask
-        RootDirectory="$([MSBuild]::NormalizePath('$(ClangFormatRoot)'))"
-        Extensions="$(ClangFormatExtensions)"
+        PreciseChangeDetectionStrategy="$(PreciseChangeDetectionStrategy)"
         ClangFormatToolPath="$(ClangFormatToolPath)"
+        ConfigFile="$([MSBuild]::NormalizePath('$(ClangFormatConfigFile)'))"
+        Extensions="$(ClangFormatExtensions)"
         IgnorePatterns="$(ClangFormatIgnore)"
         MaxProcesses="$(ClangFormatMaxProcesses)"
-        ConfigFile="$([MSBuild]::NormalizePath('$(ClangFormatConfigFile)'))"
+        RootDirectory="$([MSBuild]::NormalizePath('$(ClangFormatRoot)'))"
         StampDirectory="$([MSBuild]::NormalizePath('$(ClangFormatTaskIntDir)'))" />
   </Target>
 </Project>
