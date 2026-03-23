@@ -25,12 +25,13 @@
   <Target Name="RunClangFormatTool" BeforeTargets="$(RunClangFormatBeforeTarget)">
     <Message Text="Running ClangFormat incrementally..." Importance="normal" />
     <ClangFormatTask
-        RootDirectory="$([MSBuild]::NormalizePath('$(ClangFormatRoot)'))"
-        Extensions="$(ClangFormatExtensions)"
+        PreciseChangeDetectionStrategy="$(PreciseChangeDetectionStrategy)"
         ClangFormatToolPath="$(ClangFormatToolPath)"
+        ConfigFile="$([MSBuild]::NormalizePath('$(ClangFormatConfigFile)'))"
+        Extensions="$(ClangFormatExtensions)"
         IgnorePatterns="$(ClangFormatIgnore)"
         MaxProcesses="$(ClangFormatMaxProcesses)"
-        ConfigFile="$([MSBuild]::NormalizePath('$(ClangFormatConfigFile)'))"
+        RootDirectory="$([MSBuild]::NormalizePath('$(ClangFormatRoot)'))"
         StampDirectory="$([MSBuild]::NormalizePath('$(ClangFormatTaskIntDir)'))" />
   </Target>
 </Project>

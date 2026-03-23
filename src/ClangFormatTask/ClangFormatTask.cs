@@ -3,6 +3,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -14,7 +15,6 @@ namespace ClangFormatTask
 {
     public class ClangFormatTask : MSBuildTask
     {
-        static readonly string stamp_extension = ".stamp";
         static readonly string extensions = ".cpp|.c|.h|.hpp|.inl";
         static readonly string processors = "1";
 
@@ -34,6 +34,8 @@ namespace ClangFormatTask
         public string MaxProcesses { get; set; } = processors;
         // Optional global config file path (if empty, clang-format will search)
         public string ConfigFile { get; set; }
+        // Optional setting for change detection strategy. Timestamp is default.
+        public bool PreciseChangeDetectionStrategy { get; set; } = false;
 
         private List<Regex> _ignoreRegexList;
         private MessageImportance? VerbosityLevel { get; set; }
@@ -141,6 +143,8 @@ namespace ClangFormatTask
                 var filesToFormat = new List<string>();
                 var ignoredFiles = new List<string>();
 
+                EmitPreciseChangeDetectionStrategy();
+
                 foreach (var file in collected)
                 {
                     if (IsIgnored(file))
@@ -149,10 +153,10 @@ namespace ClangFormatTask
                         continue;
                     }
 
-                    string stampFileName = MakeStampFileName(root, file);
+                    string stampFileName = ChangeDetectionUtils.MakeStampFileName(root, file, x => Log.LogMessage(x));
                     string stampPath = Path.Combine(StampDirectory, stampFileName);
 
-                    if (!HasFileChanged(file, stampPath))
+                    if (!ChangeDetectionUtils.HasFileChanged(file, stampPath, PreciseChangeDetectionStrategy, x => Log.LogMessage(x)))
                     {
                         if (VerbosityLevel >= MessageImportance.Low)
                         {
@@ -204,12 +208,14 @@ namespace ClangFormatTask
                         else
                         {
                             // Compute hash in parallel
-                            string hash = ComputeFileHash(file);
+                            string hash = PreciseChangeDetectionStrategy
+                                ? ChangeDetectionUtils.ComputeFileHash(file, x => Log.LogWarning(x))
+                                : ChangeDetectionUtils.ComputeTimestamp(file, x => Log.LogWarning(x))?.ToUniversalTime().ToString(ChangeDetectionUtils.DateTimeFormat, CultureInfo.InvariantCulture);
                             if (hash != null)
                             {
-                                string stampFileName = MakeStampFileName(root, file);
+                                string stampFileName = ChangeDetectionUtils.MakeStampFileName(root, file, x => Log.LogWarning(x));
                                 string stampPath = Path.Combine(StampDirectory, stampFileName);
-                                UpdateStamp(stampPath, hash);
+                                ChangeDetectionUtils.UpdateStamp(stampPath, hash, x => Log.LogWarning(x));
                             }
                             Interlocked.Increment(ref reformattedCount);
                         }
@@ -325,84 +331,6 @@ namespace ClangFormatTask
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(p => p, StringComparer.OrdinalIgnoreCase);
         }
-        private string MakeStampFileName(string rootDir, string filePath)
-        {
-            try
-            {
-                string relative = TaskUtils.GetRelativePath(rootDir, filePath);
-
-                // Compute hash of relative path
-                using var sha = System.Security.Cryptography.SHA256.Create();
-                byte[] hashBytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(relative));
-                string hashString = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
-
-                // Sanitize original file name: remove invalid chars
-                string fileName = Path.GetFileName(filePath);
-                string sanitized = string.Concat(fileName.Select(c =>
-                    char.IsLetterOrDigit(c) || c == '_' || c == '-' ? c : '_'));
-
-                return $"{sanitized}_{hashString}{stamp_extension}";
-            }
-            catch (Exception ex)
-            {
-                Log.LogWarning($"Failed to generate stamp filename for {filePath}: {ex.Message}");
-                string fallback = filePath.GetHashCode().ToString("x");
-                string fileName = Path.GetFileName(filePath);
-                string sanitized = string.Concat(fileName.Select(c =>
-                    char.IsLetterOrDigit(c) || c == '_' || c == '-' ? c : '_'));
-                return $"{sanitized}_{fallback}{stamp_extension}";
-            }
-        }
-        private void UpdateStamp(string stampFile, string hash)
-        {
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(stampFile)!);
-                File.WriteAllText(stampFile, hash);
-            }
-            catch (Exception ex)
-            {
-                Log.LogWarning($"Failed to update stamp {stampFile}: {ex.Message}");
-            }
-        }
-        private string ComputeFileHash(string file)
-        {
-            try
-            {
-                using var stream = File.OpenRead(file);
-                using var sha = System.Security.Cryptography.SHA256.Create();
-                byte[] hash = sha.ComputeHash(stream);
-
-                // Compatible hex conversion
-                var sb = new System.Text.StringBuilder(hash.Length * 2);
-                foreach (var b in hash)
-                {
-                    // lowercase hex
-                    sb.Append(b.ToString("x2"));
-                }
-                return sb.ToString();
-            }
-            catch (Exception ex)
-            {
-                Log.LogWarning($"Failed to compute hash for {file}: {ex.Message}");
-                return null;
-            }
-        }
-        private bool HasFileChanged(string file, string stampFile)
-        {
-            string currentHash = ComputeFileHash(file);
-            if (currentHash == null)
-            {
-                return true;
-            }
-            if (!File.Exists(stampFile))
-            {
-                return true;
-            }
-
-            string oldHash = File.ReadAllText(stampFile).Trim();
-            return !string.Equals(currentHash, oldHash, StringComparison.OrdinalIgnoreCase);
-        }
         private bool IsIgnored(string file)
         {
             if (_ignoreRegexList == null || _ignoreRegexList.Count == 0)
@@ -425,6 +353,18 @@ namespace ClangFormatTask
                 }
             }
             return false;
+        }
+        private void EmitPreciseChangeDetectionStrategy()
+        {
+            if (!(VerbosityLevel >= MessageImportance.Normal))
+            {
+                // The logging is not required, skip it early.
+                return;
+            }
+            if (PreciseChangeDetectionStrategy)
+            {
+                Log.LogMessage(MessageImportance.High, "Using precise change detection strategy (hash-based).");
+            }
         }
         private void EmitVersion(string exe)
         {
