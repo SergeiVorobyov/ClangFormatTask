@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -57,49 +58,70 @@ namespace ClangFormatTask
             fullCommand = null;
             exitCode = -1;
 
+            string args = "-i";
             try
             {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = exe,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-
-                string args = "-i";
+                // Build arguments, including config file if specified. Note that config file is optional
+                // and clang-format will search for it in parent directories if not provided.
                 if (!string.IsNullOrEmpty(configFile))
                 {
                     args = $"-style=file:{Quoted(configFile)} {args}";
                 }
 
                 args += $" \"{file}\"";
-                psi.Arguments = args;
 
-                using (var proc = new Process { StartInfo = psi })
+                // First attempt: use the executable path as it is (e.g. if it's a simple name relying on PATH,
+                // or fully specified path to clang-format tool). In case of file not found, and if it is a simple
+                // or relative name, we will attempt to resolve it in standard location (C:\Program Files\LLVM\bin)
+                // and retry.
+                int maxRetries = Path.GetFileName(exe) != exe ? 1 : 2;
+                for (int i = 0; i < maxRetries; ++i)
                 {
-                    proc.Start();
-                    stdout = proc.StandardOutput.ReadToEnd();
-                    stderr = proc.StandardError.ReadToEnd();
-                    proc.WaitForExit();
-                    exitCode = proc.ExitCode;
+                    try
+                    {
+                        var psi = new ProcessStartInfo
+                        {
+                            FileName = exe,
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                            Arguments = args
+                        };
+
+                        using (var proc = new Process { StartInfo = psi })
+                        {
+                            proc.Start();
+                            stdout = proc.StandardOutput.ReadToEnd();
+                            stderr = proc.StandardError.ReadToEnd();
+                            proc.WaitForExit();
+                            exitCode = proc.ExitCode;
+                        }
+
+                        fullCommand = $"{psi.FileName} {psi.Arguments}";
+
+                        if (exitCode != 0)
+                        {
+                            if (stderr.Length == 0)
+                            {
+                                 stderr = $"ClangFormat exited with code {exitCode} but did not provide any error message.";
+                            }
+                            // Failure: return false (caller will log)
+                            return false;
+                        }
+                    }
+                    catch (Win32Exception ex) when (ex.NativeErrorCode == 2 && i < maxRetries - 1) // Catch only ERROR_FILE_NOT_FOUND and if we can retry
+                    {
+                        // Attempt to resolve it in standard location (C:\Program Files\LLVM\bin) and retry.
+                        exe = Environment.GetEnvironmentVariable("ProgramFiles") + @$"\LLVM\bin\{Path.GetFileName(exe)}";
+                    }
                 }
-
-                fullCommand = $"{psi.FileName} {psi.Arguments}";
-
-                if (exitCode != 0)
-                {
-                    // Failure: return false (caller will log)
-                    return false;
-                }
-
                 return true;
             }
             catch (Exception ex)
             {
                 stderr = ex.Message;
-                fullCommand = $"{exe} (failed to start)";
+                fullCommand = $"{exe} {args}";
                 return false;
             }
         }
