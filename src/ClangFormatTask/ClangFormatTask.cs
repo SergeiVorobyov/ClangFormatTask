@@ -224,7 +224,14 @@ namespace ClangFormatTask
                     // Emit queued logs
                     while (logQueue.TryDequeue(out var m))
                     {
-                        Log.LogMessage(m.Item1, m.Item2);
+                        if (success)
+                        {
+                            Log.LogMessage(m.Item1, m.Item2);
+                        }
+                        else
+                        {
+                            Log.LogError(m.Item2);
+                        }
                     }
                 }
 
